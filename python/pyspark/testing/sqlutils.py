@@ -27,13 +27,8 @@ from pyspark.sql.types import Row
 from pyspark.testing.utils import (
     ReusedPySparkTestCase,
     PySparkErrorTestUtils,
-    have_pandas,
-    pandas_requirement_message,
-    have_pyarrow,
-    pyarrow_requirement_message,
 )
 from pyspark.find_spark_home import _find_spark_home
-
 
 SPARK_HOME = _find_spark_home()
 
@@ -63,7 +58,7 @@ def search_jar(project_relative_path, sbt_jar_name_prefix, mvn_jar_name_prefix):
         return jars[0]
 
 
-test_not_compiled_message = None
+test_not_compiled_message = ""
 try:
     from pyspark.sql.utils import require_test_compiled
 
@@ -71,7 +66,7 @@ try:
 except Exception as e:
     test_not_compiled_message = str(e)
 
-test_compiled = test_not_compiled_message is None
+test_compiled = not test_not_compiled_message
 
 
 class SQLTestUtils:
@@ -132,6 +127,20 @@ class SQLTestUtils:
         finally:
             for t in tables:
                 self.spark.sql("DROP TABLE IF EXISTS %s" % t)
+
+    @contextmanager
+    def view(self, *views):
+        """
+        A convenient context manager for persistent (catalog) views. On exit, runs
+        ``DROP VIEW IF EXISTS`` for each name. For temporary views, use :meth:`temp_view`.
+        """
+        assert hasattr(self, "spark"), "it should have 'spark' attribute, having a spark session."
+
+        try:
+            yield
+        finally:
+            for v in views:
+                self.spark.sql("DROP VIEW IF EXISTS %s" % v)
 
     @contextmanager
     def temp_view(self, *views):

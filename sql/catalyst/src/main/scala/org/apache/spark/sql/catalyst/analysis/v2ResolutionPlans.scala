@@ -123,8 +123,6 @@ case class UnresolvedFieldPosition(position: ColumnPosition) extends FieldPositi
 case class UnresolvedFunctionName(
     multipartIdentifier: Seq[String],
     commandName: String,
-    requirePersistent: Boolean,
-    funcTypeMismatchHint: Option[String],
     possibleQualifiedName: Option[Seq[String]] = None) extends UnresolvedLeafNode {
   final override val nodePatterns: Seq[TreePattern] = Seq(UNRESOLVED_FUNC)
 }
@@ -253,7 +251,9 @@ case class ResolvedNonPersistentFunc(
 case class ResolvedIdentifier(
     catalog: CatalogPlugin,
     identifier: Identifier,
-    override val output: Seq[Attribute] = Nil) extends LeafNodeWithoutStats
+    override val output: Seq[Attribute] = Nil) extends LeafNodeWithoutStats {
+  def name: String = (catalog.name +: identifier.namespace :+ identifier.name).quoted
+}
 
 object ResolvedIdentifier {
   def unapply(ri: ResolvedIdentifier): Option[(CatalogPlugin, Identifier)] = {

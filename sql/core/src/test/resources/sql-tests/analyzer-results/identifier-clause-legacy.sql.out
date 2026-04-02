@@ -435,7 +435,7 @@ CreateViewCommand `v`, [(c1,None)], VALUES(1), false, false, LocalTempView, UNSU
 -- !query
 DROP VIEW IDENTIFIER('v')
 -- !query analysis
-DropTempViewCommand v
+DropTempViewCommand v, false
 
 
 -- !query
@@ -540,13 +540,13 @@ DescribeFunctionCommand org.apache.spark.sql.catalyst.expressions.ExpressionInfo
 -- !query
 REFRESH FUNCTION IDENTIFIER('ident.' || 'myDoubleAvg')
 -- !query analysis
-RefreshFunctionCommand ident, mydoubleavg
+RefreshFunctionCommand spark_catalog.ident.myDoubleAvg
 
 
 -- !query
 DROP FUNCTION IDENTIFIER('ident.' || 'myDoubleAvg')
 -- !query analysis
-DropFunctionCommand spark_catalog.ident.mydoubleavg, false, false
+DropFunctionCommand spark_catalog.ident.myDoubleAvg, false, false
 
 
 -- !query
@@ -571,7 +571,7 @@ DropFunctionCommand myDoubleAvg, false, true
 -- !query
 DECLARE var = 'sometable'
 -- !query analysis
-CreateVariable defaultvalueexpression(sometable, 'sometable'), false
+CreateVariable default(sometable, sql=''sometable''), false
 +- ResolvedIdentifier org.apache.spark.sql.catalyst.analysis.FakeSystemCatalog$@xxxxxxxx, session.var
 
 
@@ -883,7 +883,7 @@ org.apache.spark.sql.AnalysisException
   "errorClass" : "REQUIRES_SINGLE_PART_NAMESPACE",
   "sqlState" : "42K05",
   "messageParameters" : {
-    "namespace" : "`a`.`b`",
+    "identifier" : "`a`.`b`.`c`",
     "sessionCatalog" : "spark_catalog"
   }
 }
@@ -897,7 +897,7 @@ org.apache.spark.sql.AnalysisException
   "errorClass" : "REQUIRES_SINGLE_PART_NAMESPACE",
   "sqlState" : "42K05",
   "messageParameters" : {
-    "namespace" : "`a`.`b`",
+    "identifier" : "`a`.`b`.`c`",
     "sessionCatalog" : "spark_catalog"
   }
 }
@@ -911,7 +911,7 @@ org.apache.spark.sql.AnalysisException
   "errorClass" : "REQUIRES_SINGLE_PART_NAMESPACE",
   "sqlState" : "42K05",
   "messageParameters" : {
-    "namespace" : "`a`.`b`",
+    "identifier" : "`a`.`b`.`c`",
     "sessionCatalog" : "spark_catalog"
   }
 }
@@ -925,7 +925,7 @@ org.apache.spark.sql.AnalysisException
   "errorClass" : "REQUIRES_SINGLE_PART_NAMESPACE",
   "sqlState" : "42K05",
   "messageParameters" : {
-    "namespace" : "`a`.`b`",
+    "identifier" : "`a`.`b`.`c`",
     "sessionCatalog" : "spark_catalog"
   }
 }
@@ -939,7 +939,7 @@ org.apache.spark.sql.AnalysisException
   "errorClass" : "REQUIRES_SINGLE_PART_NAMESPACE",
   "sqlState" : "42K05",
   "messageParameters" : {
-    "namespace" : "`a`.`b`.`c`",
+    "identifier" : "`a`.`b`.`c`.`d`",
     "sessionCatalog" : "spark_catalog"
   }
 }
@@ -975,7 +975,7 @@ org.apache.spark.sql.AnalysisException
   "errorClass" : "REQUIRES_SINGLE_PART_NAMESPACE",
   "sqlState" : "42K05",
   "messageParameters" : {
-    "namespace" : "`a`.`b`.`c`",
+    "identifier" : "`a`.`b`.`c`.`d`",
     "sessionCatalog" : "spark_catalog"
   },
   "queryContext" : [ {
@@ -993,10 +993,12 @@ CREATE TEMPORARY FUNCTION IDENTIFIER('default.my' || 'DoubleAvg') AS 'test.org.a
 -- !query analysis
 org.apache.spark.sql.catalyst.parser.ParseException
 {
-  "errorClass" : "INVALID_SQL_SYNTAX.CREATE_TEMP_FUNC_WITH_DATABASE",
-  "sqlState" : "42000",
+  "errorClass" : "INVALID_TEMP_OBJ_QUALIFIER",
+  "sqlState" : "42602",
   "messageParameters" : {
-    "database" : "`default`"
+    "objectName" : "`myDoubleAvg`",
+    "objectType" : "FUNCTION",
+    "qualifier" : "`default`"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1013,11 +1015,12 @@ DROP TEMPORARY FUNCTION IDENTIFIER('default.my' || 'DoubleAvg')
 -- !query analysis
 org.apache.spark.sql.catalyst.parser.ParseException
 {
-  "errorClass" : "INVALID_SQL_SYNTAX.MULTI_PART_NAME",
-  "sqlState" : "42000",
+  "errorClass" : "INVALID_TEMP_OBJ_QUALIFIER",
+  "sqlState" : "42602",
   "messageParameters" : {
-    "name" : "`default`.`myDoubleAvg`",
-    "statement" : "DROP TEMPORARY FUNCTION"
+    "objectName" : "`myDoubleAvg`",
+    "objectType" : "FUNCTION",
+    "qualifier" : "`default`"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1034,10 +1037,12 @@ CREATE TEMPORARY VIEW IDENTIFIER('default.v')(c1) AS VALUES(1)
 -- !query analysis
 org.apache.spark.sql.catalyst.parser.ParseException
 {
-  "errorClass" : "TEMP_VIEW_NAME_TOO_MANY_NAME_PARTS",
-  "sqlState" : "428EK",
+  "errorClass" : "INVALID_TEMP_OBJ_QUALIFIER",
+  "sqlState" : "42602",
   "messageParameters" : {
-    "actualName" : "`default`.`v`"
+    "objectName" : "`v`",
+    "objectType" : "VIEW",
+    "qualifier" : "`default`"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1093,13 +1098,13 @@ InsertIntoHadoopFsRelationCommand file:[not included in comparison]/{warehouse_d
 -- !query
 drop view v1
 -- !query analysis
-DropTempViewCommand v1
+DropTempViewCommand v1, false
 
 
 -- !query
 drop table t1
 -- !query analysis
-DropTempViewCommand t1
+DropTempViewCommand t1, false
 
 
 -- !query
@@ -1112,21 +1117,21 @@ DropTable false, false
 -- !query
 DECLARE agg = 'max'
 -- !query analysis
-CreateVariable defaultvalueexpression(max, 'max'), false
+CreateVariable default(max, sql=''max''), false
 +- ResolvedIdentifier org.apache.spark.sql.catalyst.analysis.FakeSystemCatalog$@xxxxxxxx, session.agg
 
 
 -- !query
 DECLARE col = 'c1'
 -- !query analysis
-CreateVariable defaultvalueexpression(c1, 'c1'), false
+CreateVariable default(c1, sql=''c1''), false
 +- ResolvedIdentifier org.apache.spark.sql.catalyst.analysis.FakeSystemCatalog$@xxxxxxxx, session.col
 
 
 -- !query
 DECLARE tab = 'T'
 -- !query analysis
-CreateVariable defaultvalueexpression(T, 'T'), false
+CreateVariable default(T, sql=''T''), false
 +- ResolvedIdentifier org.apache.spark.sql.catalyst.analysis.FakeSystemCatalog$@xxxxxxxx, session.tab
 
 
@@ -1393,7 +1398,8 @@ org.apache.spark.sql.catalyst.ExtendedAnalysisException
   "errorClass" : "TABLE_OR_VIEW_NOT_FOUND",
   "sqlState" : "42P01",
   "messageParameters" : {
-    "relationName" : "`v`"
+    "relationName" : "`v`",
+    "searchPath" : "[`system`.`builtin`, `system`.`session`, `spark_catalog`.`default`]"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1447,7 +1453,8 @@ org.apache.spark.sql.catalyst.ExtendedAnalysisException
   "errorClass" : "TABLE_OR_VIEW_NOT_FOUND",
   "sqlState" : "42P01",
   "messageParameters" : {
-    "relationName" : "`tab`"
+    "relationName" : "`tab`",
+    "searchPath" : "[`system`.`builtin`, `system`.`session`, `spark_catalog`.`default`]"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1481,7 +1488,8 @@ org.apache.spark.sql.catalyst.ExtendedAnalysisException
   "errorClass" : "TABLE_OR_VIEW_NOT_FOUND",
   "sqlState" : "42P01",
   "messageParameters" : {
-    "relationName" : "`tab`"
+    "relationName" : "`tab`",
+    "searchPath" : "[`system`.`builtin`, `system`.`session`, `spark_catalog`.`default`]"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1515,7 +1523,8 @@ org.apache.spark.sql.catalyst.ExtendedAnalysisException
   "errorClass" : "TABLE_OR_VIEW_NOT_FOUND",
   "sqlState" : "42P01",
   "messageParameters" : {
-    "relationName" : "`tab`"
+    "relationName" : "`tab`",
+    "searchPath" : "[`system`.`builtin`, `system`.`session`, `spark_catalog`.`default`]"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1563,7 +1572,8 @@ org.apache.spark.sql.catalyst.ExtendedAnalysisException
   "errorClass" : "TABLE_OR_VIEW_NOT_FOUND",
   "sqlState" : "42P01",
   "messageParameters" : {
-    "relationName" : "`tab_renamed`"
+    "relationName" : "`tab_renamed`",
+    "searchPath" : "[`system`.`builtin`, `system`.`session`, `spark_catalog`.`default`]"
   },
   "queryContext" : [ {
     "objectType" : "",
@@ -1802,7 +1812,7 @@ DropTable false, false
 -- !query
 DECLARE IDENTIFIER('my_var') = 'value'
 -- !query analysis
-CreateVariable defaultvalueexpression(value, 'value'), false
+CreateVariable default(value, sql=''value''), false
 +- ResolvedIdentifier org.apache.spark.sql.catalyst.analysis.FakeSystemCatalog$@xxxxxxxx, session.my_var
 
 
@@ -2166,7 +2176,8 @@ org.apache.spark.sql.catalyst.ExtendedAnalysisException
   "errorClass" : "TABLE_OR_VIEW_NOT_FOUND",
   "sqlState" : "42P01",
   "messageParameters" : {
-    "relationName" : "`test_view`"
+    "relationName" : "`test_view`",
+    "searchPath" : "[`system`.`builtin`, `system`.`session`, `spark_catalog`.`identifier_clause_test_schema`]"
   },
   "queryContext" : [ {
     "objectType" : "EXECUTE IMMEDIATE",
@@ -2186,7 +2197,8 @@ org.apache.spark.sql.catalyst.analysis.NoSuchTableException
   "errorClass" : "TABLE_OR_VIEW_NOT_FOUND",
   "sqlState" : "42P01",
   "messageParameters" : {
-    "relationName" : "`spark_catalog`.`identifier_clause_test_schema`.`test_view`"
+    "relationName" : "`spark_catalog`.`identifier_clause_test_schema`.`test_view`",
+    "searchPath" : "[`spark_catalog`.`identifier_clause_test_schema`]"
   }
 }
 
