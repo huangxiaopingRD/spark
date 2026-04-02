@@ -30,7 +30,6 @@ from pyspark.pandas.missing.indexes import MissingPandasLikeTimedeltaIndex
 from pyspark.pandas.series import Series
 from pyspark.sql import functions as F
 
-
 HOURS_PER_DAY = 24
 MINUTES_PER_HOUR = 60
 SECONDS_PER_MINUTE = 60
@@ -112,8 +111,9 @@ class TimedeltaIndex(Index):
             raise TypeError("Index.name must be a hashable type")
 
         if isinstance(data, (Series, Index)):
-            if dtype is None:
-                dtype = "timedelta64[ns]"
+            if LooseVersion(pd.__version__) < "3.0.0":
+                if dtype is None:
+                    dtype = "timedelta64[ns]"
             return cast(TimedeltaIndex, Index(data, dtype=dtype, copy=copy, name=name))
 
         kwargs = dict(
@@ -133,10 +133,10 @@ class TimedeltaIndex(Index):
                 kwargs["closed"] = closed
         else:
             if unit is not _NoValue:
-                raise ValueError("The 'unit' keyword is not supported in pandas 3.0.0 and later.")
+                raise TypeError("The 'unit' keyword is not supported in pandas 3.0.0 and later.")
 
             if closed is not _NoValue:
-                raise ValueError("The 'closed' keyword is not supported in pandas 3.0.0 and later.")
+                raise TypeError("The 'closed' keyword is not supported in pandas 3.0.0 and later.")
 
         return cast(TimedeltaIndex, ps.from_pandas(pd.TimedeltaIndex(**kwargs)))
 

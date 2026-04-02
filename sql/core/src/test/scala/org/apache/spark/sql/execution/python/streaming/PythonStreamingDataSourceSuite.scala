@@ -444,13 +444,15 @@ class PythonStreamingDataSourceSimpleSuite extends PythonDataSourceSuiteBase {
     }
     assert(err.getCause.isInstanceOf[SparkException])
     val cause = err.getCause.asInstanceOf[SparkException]
+    // SPARK-55583: Python streaming data source wraps all Python exceptions as
+    // PYTHON_STREAMING_DATA_SOURCE_RUNTIME_ERROR. The underlying schema mismatch
+    // error (DATA_SOURCE_RETURN_SCHEMA_MISMATCH) is preserved in the message.
     checkErrorMatchPVals(
       cause,
-      condition = "ARROW_TYPE_MISMATCH",
+      condition = "PYTHON_STREAMING_DATA_SOURCE_RUNTIME_ERROR",
       parameters = Map(
-        "operation" -> "Python streaming data source read",
-        "outputTypes" -> "StructType\\(StructField\\(id,IntegerType,false\\)\\)",
-        "actualDataTypes" -> "StructType\\(StructField\\(id,StringType,true\\)\\)"
+        "action" -> "planPartitions",
+        "msg" -> "(?s).*DATA_SOURCE_RETURN_SCHEMA_MISMATCH.*"
       )
     )
   }
@@ -1319,7 +1321,7 @@ class PythonStreamingDataSourceWriteSuite extends PythonDataSourceSuiteBase {
     val dataSource =
       createUserDefinedPythonDataSource(dataSourceName, simpleDataStreamWriterScript)
     spark.dataSource.registerPython(dataSourceName, dataSource)
-    val inputData = MemoryStream[Int](numPartitions = 3)
+    val inputData = MemoryStream[Int](spark, numPartitions = 3)
     val df = inputData.toDF()
     withTempDir { dir =>
       val path = dir.getAbsolutePath
@@ -1403,7 +1405,7 @@ class PythonStreamingDataSourceWriteSuite extends PythonDataSourceSuiteBase {
          |""".stripMargin
     val dataSource = createUserDefinedPythonDataSource(dataSourceName, dataSourceScript)
     spark.dataSource.registerPython(dataSourceName, dataSource)
-    val inputData = MemoryStream[Int](numPartitions = 3)
+    val inputData = MemoryStream[Int](spark, numPartitions = 3)
     withTempDir { dir =>
       val path = dir.getAbsolutePath
       val checkpointDir = new File(path, "checkpoint")
