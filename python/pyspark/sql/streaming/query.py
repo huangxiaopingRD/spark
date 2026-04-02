@@ -790,12 +790,12 @@ def _test() -> None:
     globs = pyspark.sql.streaming.query.__dict__.copy()
     try:
         spark = SparkSession._getActiveSessionOrCreate()
-    except Py4JError:  # noqa: F821
+    except Py4JError:
         spark = SparkSession(sc)  # type: ignore[name-defined] # noqa: F821
 
     globs["spark"] = spark
 
-    (failure_count, test_count) = doctest.testmod(
+    failure_count, test_count = doctest.testmod(
         pyspark.sql.streaming.query,
         globs=globs,
         optionflags=doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE | doctest.REPORT_NDIFF,

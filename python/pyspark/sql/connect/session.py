@@ -15,9 +15,6 @@
 # limitations under the License.
 #
 import uuid
-from pyspark.sql.connect.utils import check_dependencies
-
-check_dependencies(__name__)
 
 import json
 import threading
@@ -69,10 +66,9 @@ from pyspark.sql.connect.profiler import ProfilerCollector
 from pyspark.sql.connect.readwriter import DataFrameReader
 from pyspark.sql.connect.streaming.readwriter import DataStreamReader
 from pyspark.sql.connect.streaming.query import StreamingQueryManager
-from pyspark.sql.pandas.serializers import ArrowStreamPandasSerializer
+from pyspark.sql.pandas.conversion import create_arrow_batch_from_pandas
 from pyspark.sql.pandas.types import (
     to_arrow_schema,
-    to_arrow_type,
     _deduplicate_field_names,
     from_arrow_schema,
     from_arrow_type,
@@ -133,12 +129,10 @@ class SparkSession:
             self._hook_factories: list["Callable[[SparkSession], SparkSession.Hook]"] = []
 
         @overload
-        def config(self, key: str, value: Any) -> "SparkSession.Builder":
-            ...
+        def config(self, key: str, value: Any) -> "SparkSession.Builder": ...
 
         @overload
-        def config(self, *, map: Dict[str, "OptionalPrimitiveType"]) -> "SparkSession.Builder":
-            ...
+        def config(self, *, map: Dict[str, "OptionalPrimitiveType"]) -> "SparkSession.Builder": ...
 
         def config(
             self,
@@ -381,8 +375,12 @@ class SparkSession:
     def table(self, tableName: str) -> ParentDataFrame:
         if not isinstance(tableName, str):
             raise PySparkTypeError(
-                errorClass="NOT_STR",
-                messageParameters={"arg_name": "tableName", "arg_type": type(tableName).__name__},
+                errorClass="NOT_EXPECTED_TYPE",
+                messageParameters={
+                    "arg_name": "tableName",
+                    "expected_type": "str",
+                    "arg_type": type(tableName).__name__,
+                },
             )
 
         return self.read.table(tableName)
@@ -508,9 +506,10 @@ class SparkSession:
 
         elif schema is not None:
             raise PySparkTypeError(
-                errorClass="NOT_LIST_OR_NONE_OR_STRUCT",
+                errorClass="NOT_EXPECTED_TYPE",
                 messageParameters={
                     "arg_name": "schema",
+                    "expected_type": "list, None or StructType",
                     "arg_type": type(schema).__name__,
                 },
             )
@@ -595,7 +594,6 @@ class SparkSession:
             # Determine arrow types to coerce data when creating batches
             arrow_schema: Optional[pa.Schema] = None
             spark_types: List[Optional[DataType]]
-            arrow_types: List[Optional[pa.DataType]]
             if isinstance(schema, StructType):
                 deduped_schema = cast(StructType, _deduplicate_field_names(schema))
                 spark_types = [field.dataType for field in deduped_schema.fields]
@@ -604,7 +602,6 @@ class SparkSession:
                     timezone="UTC",
                     prefers_large_types=prefers_large_types,
                 )
-                arrow_types = [field.type for field in arrow_schema]
                 _cols = [str(x) if not isinstance(x, str) else x for x in schema.fieldNames()]
             elif isinstance(schema, DataType):
                 raise PySparkTypeError(
@@ -614,40 +611,41 @@ class SparkSession:
             else:
                 # Any timestamps must be coerced to be compatible with Spark
                 spark_types = [
-                    TimestampType()
-                    if is_datetime64_dtype(t) or isinstance(t, pd.DatetimeTZDtype)
-                    else DayTimeIntervalType()
-                    if is_timedelta64_dtype(t)
-                    else None
+                    (
+                        TimestampType()
+                        if is_datetime64_dtype(t) or isinstance(t, pd.DatetimeTZDtype)
+                        else DayTimeIntervalType()
+                        if is_timedelta64_dtype(t)
+                        else None
+                    )
                     for t in data.dtypes
-                ]
-                arrow_types = [
-                    to_arrow_type(dt, timezone="UTC", prefers_large_types=prefers_large_types)
-                    if dt is not None
-                    else None
-                    for dt in spark_types
                 ]
 
             safecheck = configs["spark.sql.execution.pandas.convertToArrowArraySafely"]
 
-            ser = ArrowStreamPandasSerializer(cast(str, timezone), safecheck == "true", False)
-
-            _table = pa.Table.from_batches(
-                [
-                    ser._create_batch(
-                        [
-                            (c, at, st)
-                            for (_, c), at, st in zip(data.items(), arrow_types, spark_types)
-                        ]
-                    )
-                ]
-            )
+            # Handle the 0-column case separately to preserve row count.
+            # pa.RecordBatch.from_pandas preserves num_rows via pandas index metadata.
+            if len(data.columns) == 0:
+                _table = pa.Table.from_batches([pa.RecordBatch.from_pandas(data)])
+            else:
+                _table = pa.Table.from_batches(
+                    [
+                        create_arrow_batch_from_pandas(
+                            [(c, st) for (_, c), st in zip(data.items(), spark_types)],
+                            timezone=cast(str, timezone),
+                            safecheck=safecheck == "true",
+                            prefers_large_types=prefers_large_types,
+                        )
+                    ]
+                )
 
             if isinstance(schema, StructType):
                 assert arrow_schema is not None
-                _table = _table.rename_columns(
-                    cast(StructType, _deduplicate_field_names(schema)).names
-                ).cast(arrow_schema)
+                # Skip cast for 0-column tables as it loses row count
+                if len(schema.fields) > 0:
+                    _table = _table.rename_columns(
+                        cast(StructType, _deduplicate_field_names(schema)).names
+                    ).cast(arrow_schema)
 
         elif isinstance(data, pa.Table):
             # If no schema supplied by user then get the names of columns only
@@ -779,7 +777,7 @@ class SparkSession:
             configs["spark.sql.session.localRelationChunkSizeBytes"]  # type: ignore[arg-type]
         )
         max_batch_of_chunks_size_bytes = int(
-            configs["spark.sql.session.localRelationBatchOfChunksSizeBytes"]  # type: ignore[arg-type] # noqa: E501
+            configs["spark.sql.session.localRelationBatchOfChunksSizeBytes"]  # type: ignore[arg-type]
         )
         plan: LogicalPlan = local_relation
         if cache_threshold <= _table.nbytes:
@@ -797,6 +795,11 @@ class SparkSession:
         return df
 
     createDataFrame.__doc__ = PySparkSession.createDataFrame.__doc__
+
+    def emptyDataFrame(self, schema: Union[StructType, str]) -> "ParentDataFrame":
+        return self.createDataFrame([], schema)
+
+    emptyDataFrame.__doc__ = PySparkSession.emptyDataFrame.__doc__
 
     def sql(
         self,
@@ -948,12 +951,12 @@ class SparkSession:
                 try:
                     self.client.release_session()
                 except Exception as e:
-                    logger.warn(f"session.stop(): Session could not be released. Error: ${e}")
+                    logger.warning(f"session.stop(): Session could not be released. Error: ${e}")
 
             try:
                 self.client.close()
             except Exception as e:
-                logger.warn(f"session.stop(): Client could not be closed. Error: ${e}")
+                logger.warning(f"session.stop(): Client could not be closed. Error: ${e}")
 
             if self is SparkSession._default_session:
                 SparkSession._default_session = None
@@ -969,7 +972,7 @@ class SparkSession:
                     try:
                         PySparkSession._activeSession.stop()
                     except Exception as e:
-                        logger.warn(
+                        logger.warning(
                             "session.stop(): Local Spark Connect Server could not be stopped. "
                             f"Error: ${e}"
                         )
@@ -1334,7 +1337,7 @@ def _test() -> None:
     pyspark.sql.connect.session.SparkSession.__doc__ = None
     del pyspark.sql.connect.session.SparkSession.Builder.master.__doc__
 
-    (failure_count, test_count) = doctest.testmod(
+    failure_count, test_count = doctest.testmod(
         pyspark.sql.connect.session,
         globs=globs,
         optionflags=doctest.ELLIPSIS

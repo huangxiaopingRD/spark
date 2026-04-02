@@ -117,12 +117,24 @@ class SparkSession private[sql] (
   private def createDataset[T](encoder: AgnosticEncoder[T], data: Iterator[T]): Dataset[T] = {
     newDataset(encoder) { builder =>
       if (data.nonEmpty) {
-        val threshold = conf.get(SqlApiConf.LOCAL_RELATION_CACHE_THRESHOLD_KEY).toInt
-        val maxChunkSizeRows = conf.get(SqlApiConf.LOCAL_RELATION_CHUNK_SIZE_ROWS_KEY).toInt
-        val maxChunkSizeBytes = conf.get(SqlApiConf.LOCAL_RELATION_CHUNK_SIZE_BYTES_KEY).toInt
+        val confs = conf.getConfigMap(
+          SqlApiConf.LOCAL_RELATION_CACHE_THRESHOLD_KEY,
+          SqlApiConf.LOCAL_RELATION_CHUNK_SIZE_ROWS_KEY,
+          SqlApiConf.LOCAL_RELATION_CHUNK_SIZE_BYTES_KEY,
+          SqlApiConf.LOCAL_RELATION_BATCH_OF_CHUNKS_SIZE_BYTES_KEY,
+          SqlApiConf.ARROW_EXECUTION_USE_LARGE_VAR_TYPES,
+          SqlApiConf.SESSION_LOCAL_TIMEZONE_KEY,
+          "spark.sql.session.localRelationSizeLimit")
+
+        val threshold = confs(SqlApiConf.LOCAL_RELATION_CACHE_THRESHOLD_KEY).toInt
+        val maxChunkSizeRows = confs(SqlApiConf.LOCAL_RELATION_CHUNK_SIZE_ROWS_KEY).toInt
+        val maxChunkSizeBytes = confs(SqlApiConf.LOCAL_RELATION_CHUNK_SIZE_BYTES_KEY).toLong
         val maxBatchOfChunksSize =
-          conf.get(SqlApiConf.LOCAL_RELATION_BATCH_OF_CHUNKS_SIZE_BYTES_KEY).toLong
-        val localRelationSizeLimit = conf.get("spark.sql.session.localRelationSizeLimit").toLong
+          confs(SqlApiConf.LOCAL_RELATION_BATCH_OF_CHUNKS_SIZE_BYTES_KEY).toLong
+        val localRelationSizeLimit = confs("spark.sql.session.localRelationSizeLimit").toLong
+        val largeVarTypes =
+          confs(SqlApiConf.ARROW_EXECUTION_USE_LARGE_VAR_TYPES).toLowerCase(Locale.ROOT).toBoolean
+        val timeZoneId = confs(SqlApiConf.SESSION_LOCAL_TIMEZONE_KEY)
 
         // Serialize with chunking support
         val it = ArrowSerializer.serialize(
@@ -546,8 +558,6 @@ class SparkSession private[sql] (
   }
 
   private[sql] def timeZoneId: String = conf.get(SqlApiConf.SESSION_LOCAL_TIMEZONE_KEY)
-  private[sql] def largeVarTypes: Boolean =
-    conf.get(SqlApiConf.ARROW_EXECUTION_USE_LARGE_VAR_TYPES).toLowerCase(Locale.ROOT).toBoolean
 
   private[sql] def execute[T](plan: proto.Plan, encoder: AgnosticEncoder[T]): SparkResult[T] = {
     val value = executeInternal(plan)
@@ -742,12 +752,12 @@ class SparkSession private[sql] (
   }
 
   private def processRegisteredObservedMetrics(metrics: java.util.List[ObservedMetrics]): Unit = {
-    metrics.asScala.map { metric =>
+    metrics.asScala.foreach { metric =>
       // Here we only process metrics that belong to a registered Observation object.
       // All metrics, whether registered or not, will be collected by `SparkResult`.
       val observationOrNull = observationRegistry.remove(metric.getPlanId)
       if (observationOrNull != null) {
-        val metricsResult = Try(SparkResult.transformObservedMetrics(metric))
+        val metricsResult = SparkResult.transformObservedMetrics(metric)
         observationOrNull.setMetricsAndNotify(metricsResult)
       }
     }

@@ -381,9 +381,7 @@ class RocksDBFileManager(
     } else {
       // Delete all non-immutable files in local dir, and unzip new ones from DFS commit file
       listRocksDBFiles(localDir)._2.foreach(_.delete())
-      // TODO(SPARK-51988): We are using fs here to read the file, checksum verification
-      //  wouldn't happen for the file if enabled, since it is not using fm to open it.
-      Utils.unzipFilesFromFile(fs, dfsBatchZipFile(version, checkpointUniqueId), localDir)
+      unzipBatchZipFileFromDfs(version, checkpointUniqueId, localDir)
 
       // Copy the necessary immutable files
       val metadataFile = localMetadataFile(localDir)
@@ -424,6 +422,23 @@ class RocksDBFileManager(
         .map(_.toLong)
         .filter(_ <= version)
         .foldLeft(0L)(math.max)
+    } else {
+      0
+    }
+  }
+
+  /** Get the latest snapshot version available in DFS. If none present, it returns 0. */
+  def getLatestSnapshotVersion(): Long = {
+    val path = new Path(dfsRootDir)
+    if (fm.exists(path)) {
+      val files = fm.list(path).map(_.getPath)
+      files.filter(onlyZipFiles.accept)
+        .map { fileName =>
+          fileName.getName.stripSuffix(".zip").split("_") match {
+            case Array(version, _) => version.toLong
+            case Array(version) => version.toLong
+          }
+        }.foldLeft(0L)(math.max)
     } else {
       0
     }
@@ -680,13 +695,28 @@ class RocksDBFileManager(
     // Resolve RocksDB files for all the versions and find the max version each file is used
     val fileToMaxUsedVersion = new mutable.HashMap[String, Long]
     sortedSnapshotVersionsAndUniqueIds.foreach { case (version, uniqueId) =>
-      val files = Option(versionToRocksDBFiles.get((version, uniqueId))).getOrElse {
+      var readFromCache = true
+      val cachedFiles = Option(versionToRocksDBFiles.get((version, uniqueId))).getOrElse {
+        readFromCache = false
         val newResolvedFiles = getImmutableFilesFromVersionZip(version, uniqueId)
         versionToRocksDBFiles.put((version, uniqueId), newResolvedFiles)
         newResolvedFiles
       }
-      files.foreach(f => fileToMaxUsedVersion(f.dfsFileName) =
+      cachedFiles.foreach(f => fileToMaxUsedVersion(f.dfsFileName) =
         math.max(version, fileToMaxUsedVersion.getOrElse(f.dfsFileName, version)))
+
+      // For ckpt v1, for the min retained version, fetch metadata from cloud zip
+      // to protect files that may differ from the in-memory cache. This handles the case
+      // where a no-overwrite FS prevented a snapshot zip from being overwritten: the
+      // in-memory cache may reference a newer set of SST files (from a retry), while the
+      // cloud zip still references the original SST files.
+      // We do this for the min retained version, to make sure the files from the original
+      // upload for this version are not seen as orphan files.
+      if (uniqueId.isEmpty && version == minVersionToRetain && readFromCache) {
+        val cloudFiles = getImmutableFilesFromVersionZip(version, uniqueId)
+        cloudFiles.foreach(f => fileToMaxUsedVersion(f.dfsFileName) =
+          math.max(version, fileToMaxUsedVersion.getOrElse(f.dfsFileName, version)))
+      }
     }
 
     // Best effort attempt to delete SST files that were last used in to-be-deleted versions
@@ -924,12 +954,28 @@ class RocksDBFileManager(
       filesReused = filesReused)
   }
 
+  /**
+   * Unzip the batch zip file for the given version from DFS into localDir.
+   * Zip files with the same content can have different bytes hence different checksums.
+   * Hence for v1, since the zip file name is fixed (e.g. "5.zip"), we want to avoid
+   * comparing with the wrong checksum file, in a situation such as concurrent uploads.
+   */
+  private def unzipBatchZipFileFromDfs(
+      version: Long, checkpointUniqueId: Option[String], localDir: File): Seq[File] = {
+    if (checkpointUniqueId.isDefined) {
+      Utils.unzipFilesFromInputStream(
+        fm.open(dfsBatchZipFile(version, checkpointUniqueId)), localDir)
+    } else {
+      Utils.unzipFilesFromFile(fs, dfsBatchZipFile(version, checkpointUniqueId), localDir)
+    }
+  }
+
   /** Get the SST files required for a version from the version zip file in DFS */
   private def getImmutableFilesFromVersionZip(
       version: Long, checkpointUniqueId: Option[String] = None): Seq[RocksDBImmutableFile] = {
     Utils.deleteRecursively(localTempDir)
     Utils.createDirectory(localTempDir)
-    Utils.unzipFilesFromFile(fs, dfsBatchZipFile(version, checkpointUniqueId), localTempDir)
+    unzipBatchZipFileFromDfs(version, checkpointUniqueId, localTempDir)
     val metadataFile = localMetadataFile(localTempDir)
     val metadata = RocksDBCheckpointMetadata.readFromFile(metadataFile)
     metadata.immutableFiles

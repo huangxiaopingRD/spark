@@ -38,7 +38,7 @@ from pyspark.sql.session import _monkey_patch_RDD, SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.readwriter import DataFrameReader
 from pyspark.sql.streaming import DataStreamReader
-from pyspark.sql.udf import UDFRegistration  # noqa: F401
+from pyspark.sql.udf import UDFRegistration
 from pyspark.sql.udtf import UDTFRegistration
 from pyspark.errors.exceptions.captured import install_exception_handler
 from pyspark.sql.types import AtomicType, DataType, StructType
@@ -166,8 +166,7 @@ class SQLContext:
         cls: Type["SQLContext"], sc: "SparkContext", **static_conf: Any
     ) -> "SQLContext":
         if (
-            cls._instantiatedContext is None
-            or SQLContext._instantiatedContext._sc._jsc is None  # type: ignore[union-attr]
+            cls._instantiatedContext is None or SQLContext._instantiatedContext._sc._jsc is None  # type: ignore[union-attr]
         ):
             assert sc._jvm is not None
             # There can be only one running Spark context. That will automatically
@@ -318,8 +317,7 @@ class SQLContext:
         data: Union["RDD[RowLike]", Iterable["RowLike"]],
         schema: Union[List[str], Tuple[str, ...]] = ...,
         samplingRatio: Optional[float] = ...,
-    ) -> DataFrame:
-        ...
+    ) -> DataFrame: ...
 
     @overload
     def createDataFrame(
@@ -328,8 +326,7 @@ class SQLContext:
         schema: Union[StructType, str],
         *,
         verifySchema: bool = ...,
-    ) -> DataFrame:
-        ...
+    ) -> DataFrame: ...
 
     @overload
     def createDataFrame(
@@ -340,14 +337,12 @@ class SQLContext:
         ],
         schema: Union[AtomicType, str],
         verifySchema: bool = ...,
-    ) -> DataFrame:
-        ...
+    ) -> DataFrame: ...
 
     @overload
     def createDataFrame(
         self, data: Union["PandasDataFrameLike", "pa.Table"], samplingRatio: Optional[float] = ...
-    ) -> DataFrame:
-        ...
+    ) -> DataFrame: ...
 
     @overload
     def createDataFrame(
@@ -355,8 +350,7 @@ class SQLContext:
         data: Union["PandasDataFrameLike", "pa.Table"],
         schema: Union[StructType, str],
         verifySchema: bool = ...,
-    ) -> DataFrame:
-        ...
+    ) -> DataFrame: ...
 
     def createDataFrame(  # type: ignore[misc]
         self,
@@ -472,7 +466,7 @@ class SQLContext:
         >>> sqlContext.createDataFrame(rdd, "boolean").collect() # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
             ...
-        Py4JJavaError: ...
+        pyspark.errors.exceptions.captured.PythonException: ...
         """
         return self.sparkSession.createDataFrame(  # type: ignore[call-overload]
             data, schema, samplingRatio, verifySchema
@@ -815,7 +809,7 @@ def _test() -> None:
     ]
     globs["jsonStrings"] = jsonStrings
     globs["json"] = sc.parallelize(jsonStrings)
-    (failure_count, test_count) = doctest.testmod(
+    failure_count, test_count = doctest.testmod(
         pyspark.sql.context,
         globs=globs,
         optionflags=doctest.ELLIPSIS | doctest.NORMALIZE_WHITESPACE,
